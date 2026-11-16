@@ -1,0 +1,110 @@
+diff --git a/host/src/fps_counter.cpp b/host/src/fps_counter.cpp
+index 151b5f8..05bdccf 100644
+--- a/host/src/fps_counter.cpp
++++ b/host/src/fps_counter.cpp
+@@ -67,6 +67,13 @@ void conker::fps_counter::game_frame() {
+     game_frames.fetch_add(1, std::memory_order_relaxed);
+ }
+ 
++#if defined(CONKER_IOS)
++// The game's own frames so far, for conker-ios's frame rate readout (its touch controls' tray).
++uint64_t conker_ios_game_frames() {
++    return game_frames.load(std::memory_order_relaxed);
++}
++#endif
++
+ void conker::fps_counter::on_ui_ready() {
+     ui_ready = true;
+ }
+diff --git a/host/src/frontend.cpp b/host/src/frontend.cpp
+index 58a7262..df5842d 100644
+--- a/host/src/frontend.cpp
++++ b/host/src/frontend.cpp
+@@ -32,6 +32,9 @@
+ #include "util/file.h"
+ 
+ #include "conker.hpp"
++#if defined(CONKER_IOS)
++#include "conker_ios_game.h"
++#endif
+ 
+ // recompui's launcher shows the first entry (ui_launcher.cpp declares it extern).
+ std::vector<recomp::GameEntry> supported_games;
+@@ -203,7 +206,10 @@ namespace {
+ 
+     ultramodern::renderer::WindowHandle create_window(void*) {
+         uint32_t flags = SDL_WINDOW_RESIZABLE;
+-#if defined(RT64_SDL_WINDOW_VULKAN)
++#if defined(CONKER_IOS)
++        // iOS: the whole screen, at its native resolution.
++        flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_METAL;
++#elif defined(RT64_SDL_WINDOW_VULKAN)
+         flags |= SDL_WINDOW_VULKAN;
+ #elif defined(__APPLE__)
+         flags |= SDL_WINDOW_METAL;
+@@ -221,6 +227,11 @@ namespace {
+         SDL_VERSION(&info.version);
+         SDL_GetWindowWMInfo(window, &info);
+         return ultramodern::renderer::WindowHandle{ info.info.win.window, GetCurrentThreadId() };
++#elif defined(CONKER_IOS)
++        // RT64 renders with Metal into the CAMetalLayer of SDL's Metal view. conker-ios's
++        // UIKit glue for plume takes the view itself as the window (for its size and scale).
++        SDL_MetalView view = SDL_Metal_CreateView(window);
++        return ultramodern::renderer::WindowHandle{ view, SDL_Metal_GetLayer(view) };
+ #elif defined(__APPLE__)
+         // RT64 renders with Metal into the CAMetalLayer of a view added to the window.
+         SDL_SysWMinfo info;
+@@ -638,6 +649,18 @@ namespace {
+             // Port 1 has the keyboard, and its controller once one has pressed a button.
+             read_port(port < count ? controllers[port] : nullptr, port == 0,
+                 port == 0 && conker::mouse_camera::stick_turns_camera(), conker::look_aim::swap_sticks_now(port), conker::look_aim::z_turns_aim(port), buttons, x, y);
++#if defined(CONKER_IOS)
++            // conker-ios's touch controls (and Start, pressed as the intro is skipped) for player 1.
++            uint16_t touch_buttons = 0;
++            float touch_x = 0.0f, touch_y = 0.0f;
++            if (port == 0 && conker::ios::touch_input(&touch_buttons, &touch_x, &touch_y)) {
++                *buttons |= touch_buttons;
++                if (touch_x != 0.0f || touch_y != 0.0f) {
++                    *x = touch_x;
++                    *y = touch_y;
++                }
++            }
++#endif
+         }
+         return true;
+     }
+diff --git a/host/src/look_aim.cpp b/host/src/look_aim.cpp
+index db59a0a..5472e70 100644
+--- a/host/src/look_aim.cpp
++++ b/host/src/look_aim.cpp
+@@ -275,7 +275,12 @@ void conker::look_aim::add_mouse_gyro_options(recomp::config::Config& config) {
+         "How fast the mouse turns the camera and aims, in R-Look (hold R and look around) and the second aiming mode "
+         "(e.g. the sniper scope). <b>Zero turns mouse control off</b> and leaves the cursor free. "
+         "Mouse buttons can be bound to controls with the keyboard's controls.",
++#if defined(CONKER_IOS)
++        // conker-ios sends its touch drags and the phone's gyro as the mouse.
++        100.0);
++#else
+         recompui::is_steam_deck() ? 50.0 : 0.0);
++#endif
+     config.add_enum_option(options::mouse_camera, "Mouse: Turn the Camera",
+         "Whether the mouse turns the camera around Conker, outside R-Look and aiming. Needs Mouse: Sensitivity above zero. "
+         "<recomp-color primary>Off</recomp-color> leaves that camera to the stick and C-buttons; the mouse still aims in "
+diff --git a/host/src/main.cpp b/host/src/main.cpp
+index 2e97d08..ba8b9c4 100644
+--- a/host/src/main.cpp
++++ b/host/src/main.cpp
+@@ -391,7 +391,13 @@ namespace {
+     }
+ }
+ 
++#if defined(CONKER_IOS)
++// On iOS the app's own main (conker-ios, ios/app/ConkerApp.mm) starts SDL's
++// UIKit app and calls this from it, with the ROM it found in the Files app.
++int conker_main(int argc, char** argv) {
++#else
+ int main(int argc, char** argv) {
++#endif
+     // Unbuffered, so diagnostics (e.g. RT64's microcode hashes) survive a crash.
+     std::setvbuf(stdout, nullptr, _IONBF, 0);
+     install_crash_handler();

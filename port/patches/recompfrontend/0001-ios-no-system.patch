@@ -1,0 +1,23 @@
+diff --git a/recompui/src/composites/ui_mod_menu.cpp b/recompui/src/composites/ui_mod_menu.cpp
+index 35a9952..2263a17 100644
+--- a/recompui/src/composites/ui_mod_menu.cpp
++++ b/recompui/src/composites/ui_mod_menu.cpp
+@@ -1,4 +1,7 @@
+-﻿#include "ui_mod_menu.h"
++﻿#if defined(__APPLE__)
++#include <TargetConditionals.h>
++#endif
++#include "ui_mod_menu.h"
+ #include "ui_utils.h"
+ #include "recompui/recompui.h"
+ #include "recompui/config.h"
+@@ -305,6 +308,9 @@ void ModMenu::open_mods_folder() {
+ #elif defined(__linux__)
+     std::string command = "xdg-open \"" + mods_directory.string() + "\" &";
+     std::system(command.c_str());
++#elif defined(__APPLE__) && TARGET_OS_IPHONE
++    // iOS has no Finder to open: the mods folder is in the Files app.
++    (void)mods_directory;
+ #elif defined(__APPLE__)
+     std::string command = "open \"" + mods_directory.string() + "\"";
+     std::system(command.c_str());

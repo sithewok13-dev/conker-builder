@@ -1,0 +1,270 @@
+# Builds Conker's Bad Fur Day for iPhone from YOUR ROM, in this (private) repo. See README.md.
+#
+# Each build takes the port from the public template (PORT_REPO), so it always builds its newest version.
+#
+#   1. rom      (Linux)  downloads your ROM from the link you give (or takes it from this repo's "your-rom"
+#                        release when the link is empty), puts it in the .z64 byte order, checks it's the US
+#                        version, and turns the game's code into C with CBFD-Recompiled's recompiler.
+#   2. app      (Mac)    compiles that C and the port (port/) into the app and puts Conker.ipa in this repo's
+#                        "app" release. The ready-made parts from the public template (nothing of the game) save
+#                        about 8 minutes of Mac time.
+#   3. cleanup  (Linux)  deletes the C code handed from 1 to 2.
+#
+# Everything made from your ROM stays in this repo: keep it private.
+name: Build Conker for iPhone
+on:
+  workflow_dispatch:
+    inputs:
+      rom_link:
+        description: "Link to your Conker's Bad Fur Day ROM (USA): Google Drive, Dropbox or a download link to a .z64, .n64, .v64, .zip or .7z. Leave it empty to only update the app."
+        default: ""
+      keep_rom:
+        description: "Keep a copy of your ROM in this private repo's Releases (updates then need no link)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  # The public template this repo was made from: the port's code, its tools and the ready-made parts.
+  PORT_REPO: sithewok13-dev/conker-builder
+  PORT_REF: main
+  XCODE_VERSION: "16.4"
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  rom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      port_sha: ${{ steps.port.outputs.sha }}
+    steps:
+      - name: Is this repo private?
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "$PRIVATE" != "true" ]; then
+            echo "::error::This repo is public, and the build would put things made from your ROM in it. Make it private first (Settings > General > Danger Zone > Change visibility), then run the build again."
+            exit 1
+          fi
+
+      - name: The port (from the public template, so every build has its newest version)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PORT_REPO }}
+          ref: ${{ env.PORT_REF }}
+
+      - name: Which version of the port
+        id: port
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Tools
+        if: ${{ inputs.rom_link != '' }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq 7zip >/dev/null 2>&1 || sudo apt-get install -y -qq p7zip-full >/dev/null
+          echo "Z=$(command -v 7zz || command -v 7z)" >> "$GITHUB_ENV"
+          pip install -q gdown 2>/dev/null || pipx install -q gdown >/dev/null
+
+      - name: Download your ROM
+        if: ${{ inputs.rom_link != '' }}
+        env:
+          LINK: ${{ inputs.rom_link }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rom"; cd "$RUNNER_TEMP/rom"
+          LINK=$(printf '%s' "$LINK" | tr -d ' \r\n')
+          case "$LINK" in
+            *drive.google.com*|*docs.google.com*)
+              gdown --quiet --fuzzy "$LINK" -O download || {
+                echo "::error::Google Drive would not hand over the file. In Drive, tap the file's ⋮ > Share > General access: Anyone with the link, then copy the link again."
+                exit 1; } ;;
+            *dropbox.com*)
+              case "$LINK" in *dl=0*) url=${LINK//dl=0/dl=1} ;; *\?*) url="$LINK&dl=1" ;; *) url="$LINK?dl=1" ;; esac
+              curl -fsSL --retry 3 -o download "$url" || {
+                echo "::error::Dropbox would not hand over the file. Share it with 'Anyone with the link' and copy that link."; exit 1; } ;;
+            http://*|https://*)
+              curl -fsSL --retry 3 -o download "$LINK" || { echo "::error::Could not download the link. Check that it opens without signing in."; exit 1; } ;;
+            *)
+              echo "::error::That isn't a link. Paste the whole link to your ROM, starting with https://"; exit 1 ;;
+          esac
+          echo "downloaded $(du -h download | cut -f1)"
+
+      - name: Check your ROM (the US version, in the .z64 byte order)
+        if: ${{ inputs.rom_link != '' }}
+        run: |
+          python3 -I tools/rom.py "$RUNNER_TEMP/rom/download" "$RUNNER_TEMP/rom/conker.z64"
+          rm -f "$RUNNER_TEMP/rom/download"
+
+      - name: Keep it in the "your-rom" release (private, like this repo)
+        if: ${{ inputs.rom_link != '' && inputs.keep_rom }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete your-rom --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create your-rom "$RUNNER_TEMP/rom/conker.z64" -R "$GITHUB_REPOSITORY" --title "Your ROM" --latest=false \
+            --notes "Your Conker's Bad Fur Day ROM, checked and in the .z64 byte order, kept here so updates need no link. The app needs it too: download conker.z64 and move it to Files > On My iPhone > Conker. Keep this repo private."
+
+      - name: Don't keep it (you unticked the box)
+        if: ${{ inputs.rom_link != '' && !inputs.keep_rom }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete your-rom --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+
+      - name: Your ROM from the "your-rom" release
+        if: ${{ inputs.rom_link == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rom"
+          gh release download your-rom -p conker.z64 -D "$RUNNER_TEMP/rom" -R "$GITHUB_REPOSITORY" 2>/dev/null || {
+            echo "::error::No ROM kept here yet (or you unticked the box last time). Run the build again and paste the link to your ROM in the first box."; exit 1; }
+          python3 -I tools/rom.py "$RUNNER_TEMP/rom/conker.z64" "$RUNNER_TEMP/rom/checked.z64"
+          mv "$RUNNER_TEMP/rom/checked.z64" "$RUNNER_TEMP/rom/conker.z64"
+
+      - name: The recompiler
+        run: |
+          tools/fetch-sources.sh recompiler > fetch.log 2>&1 || { tail -20 fetch.log; echo "::error::Could not download the port's sources from GitHub: run the build again."; exit 1; }
+          cd port/third_party/CBFD-Recompiled
+          # the iOS app's hooks (skip the intro, tap to skip cutscenes) go into the recompiler's configuration
+          for patch in ../../patches/cbfd-recomp/*.patch; do git apply "$patch"; done
+          git -C tools/N64Recomp apply "$PWD/recomp/n64recomp.patch"
+          { cmake -S tools/N64Recomp -B "$RUNNER_TEMP/n64recomp" -DCMAKE_BUILD_TYPE=Release > "$RUNNER_TEMP/n64recomp.log" 2>&1 &&
+            cmake --build "$RUNNER_TEMP/n64recomp" --target N64RecompCLI RSPRecomp --parallel >> "$RUNNER_TEMP/n64recomp.log" 2>&1; } ||
+            { tail -30 "$RUNNER_TEMP/n64recomp.log"; echo "::error::The recompiler did not build: tell the port's author."; exit 1; }
+
+      - name: Turn the game's code into C
+        run: |
+          cd port/third_party/CBFD-Recompiled
+          mv "$RUNNER_TEMP/rom/conker.z64" conker/baserom.us.z64
+          python3 recomp/recompile.py --bin "$RUNNER_TEMP/n64recomp" ||
+            { rm -f conker/baserom.us.z64; echo "::error::Turning the game into C failed: tell the port's author."; exit 1; }
+          rm -rf conker/baserom.us.z64 recomp/build "$RUNNER_TEMP/rom"
+          tar -cf "$RUNNER_TEMP/game-code.tar" RecompiledFuncs
+          rm -rf RecompiledFuncs
+          echo "game code: $(du -h "$RUNNER_TEMP/game-code.tar" | cut -f1)"
+
+      - name: Hand the C code to the Mac (deleted by the cleanup job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-code
+          path: ${{ runner.temp }}/game-code.tar
+          retention-days: 1
+          compression-level: 6
+
+      - name: Delete everything made from your ROM from this machine
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/rom" "$RUNNER_TEMP/game-code.tar" port/third_party/CBFD-Recompiled/conker/baserom.us.z64 port/third_party/CBFD-Recompiled/RecompiledFuncs port/third_party/CBFD-Recompiled/recomp/build
+
+  app:
+    needs: rom
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: The port (from the public template, so every build has its newest version)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PORT_REPO }}
+          ref: ${{ needs.rom.outputs.port_sha }}  # the same version the rom job used
+
+      - name: Xcode
+        run: |
+          if [ -d "/Applications/Xcode_$XCODE_VERSION.app" ]; then sudo xcode-select -s "/Applications/Xcode_$XCODE_VERSION.app/Contents/Developer"; fi
+          xcodebuild -version | head -1
+
+      - name: The port's sources
+        run: |
+          tools/fetch-sources.sh app > fetch.log 2>&1 || { tail -20 fetch.log; echo "::error::Could not download the port's sources from GitHub: run the build again."; exit 1; }
+          cd port/third_party/CBFD-Recompiled
+          for patch in ../../patches/cbfd-recomp/*.patch; do git apply "$patch"; done
+
+      - name: The game's code in C (from the Linux job)
+        uses: actions/download-artifact@v4
+        with:
+          name: game-code
+          path: ${{ runner.temp }}
+
+      - name: Unpack it
+        run: |
+          tar -xf "$RUNNER_TEMP/game-code.tar" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/game-code.tar"
+          test -f "$RUNNER_TEMP/RecompiledFuncs/funcs.h"
+
+      - name: The ready-made parts (RT64's build tools and CMake's checks; nothing of the game)
+        run: |
+          name=$(tools/parts-key.sh)
+          mkdir -p build
+          if curl -fsSL --retry 3 "https://github.com/$PORT_REPO/releases/download/ios-parts/$name" -o parts.tar.xz &&
+             tar -xJf parts.tar.xz -C build; then
+            echo "parts: $name"
+          else
+            rm -rf build; mkdir build
+            echo "::notice::No ready-made parts match ($name): this build makes them itself, about 8 minutes longer."
+          fi
+          rm -f parts.tar.xz
+
+      - name: Configure
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr "[:upper:]" "[:lower:]" | tr -cd "a-z0-9")
+          tools/configure.sh "$RUNNER_TEMP/RecompiledFuncs" "io.github.${owner:-player}.conker" build/seed.cmake > configure.log 2>&1 ||
+            { tail -40 configure.log; echo "::error::The app's build did not start (configure failed): tell the port's author."; exit 1; }
+          tail -3 configure.log
+
+      - name: Build the app
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --target conker -- \
+            -sdk iphoneos -IDEBuildingContinueBuildingAfterErrors=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" > build.log 2>&1 ||
+            { grep -E "error:|Undefined symbols|ld: " build.log | grep -v RecompiledFuncs | sort -u | head -40
+              echo "::error::The app did not compile: tell the port's author."; exit 1; }
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Package Conker.ipa
+        run: |
+          app=$(find build -path '*Release-iphoneos/Conker.app' -type d | head -1)
+          test -n "$app"
+          # the build stamp by the tray ("build 3 · Nov 9") and on the release
+          day=$(date -u +%F); echo "SW_BUILD_DATE=$day" >> "$GITHUB_ENV"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" \
+            -c "Add :SWBuildNumber string $GITHUB_RUN_NUMBER" -c "Add :SWBuildDate string $day" "$app/Info.plist"
+          version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app/Info.plist")
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          mkdir Payload && cp -R "$app" Payload/ && zip -qry Conker.ipa Payload && rm -rf Payload
+          echo "Conker.ipa: $(du -h Conker.ipa | cut -f1)"
+
+      - name: Delete the game's code from this machine
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/RecompiledFuncs" "$RUNNER_TEMP/game-code.tar" build ~/Library/Developer/Xcode/DerivedData
+
+      - name: Put Conker.ipa in the "app" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Build $GITHUB_RUN_NUMBER · $SW_BUILD_DATE · port $APP_VERSION. Download Conker.ipa and install it with SideStore, Feather, a signing service, AltStore or Sideloadly. The game also needs your ROM in Files > On My iPhone > Conker (see the README)."
+          gh release view app -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create app -R "$GITHUB_REPOSITORY" --title "Conker app" --notes "$notes"
+          gh release upload app Conker.ipa --clobber -R "$GITHUB_REPOSITORY"
+          gh release edit app -R "$GITHUB_REPOSITORY" --notes "$notes"
+          {
+            echo "## Done"
+            echo "- **The app:** ${{ github.server_url }}/${{ github.repository }}/releases/tag/app"
+            echo "- **Your ROM, for your phone:** ${{ github.server_url }}/${{ github.repository }}/releases/tag/your-rom"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    needs: [rom, app]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Delete the game's C code handed from Linux to the Mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "game-code") | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" && echo "deleted artifact $id"
+          done

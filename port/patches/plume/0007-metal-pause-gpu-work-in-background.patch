@@ -1,0 +1,62 @@
+diff --git a/plume_metal.cpp b/plume_metal.cpp
+index f31a2f7..2371d7c 100644
+--- a/plume_metal.cpp
++++ b/plume_metal.cpp
+@@ -15,7 +15,10 @@
+ #include <CoreFoundation/CoreFoundation.h>
+ 
+ #include <algorithm>
++#include <atomic>
++#include <chrono>
+ #include <mutex>
++#include <thread>
+ 
+ #include "plume_metal.h"
+ 
+@@ -24,6 +27,22 @@ extern "C" {
+     void objc_autoreleasePoolPop(void *pool);
+ }
+ 
++// iOS: an app may not submit GPU work while it's in the background. Metal fails the command
++// buffer ("Insufficient Permission (to submit GPU work from background)") and the app was then
++// killed. The app pauses submissions as it leaves the foreground and resumes them when it's back
++// (plume_metal_set_gpu_paused); until then they wait where they start.
++static std::atomic<bool> plumeMetalGPUPaused{ false };
++
++extern "C" void plume_metal_set_gpu_paused(bool paused) {
++    plumeMetalGPUPaused.store(paused);
++}
++
++static void plumeMetalWaitWhileGPUPaused() {
++    while (plumeMetalGPUPaused.load()) {
++        std::this_thread::sleep_for(std::chrono::milliseconds(10));
++    }
++}
++
+ namespace plume {
+     // MARK: - Constants
+ 
+@@ -1966,6 +1985,7 @@ namespace plume {
+     }
+ 
+     bool MetalSwapChain::present(const uint32_t textureIndex, RenderCommandSemaphore **waitSemaphores, const uint32_t waitSemaphoreCount) {
++        plumeMetalWaitWhileGPUPaused();
+         assert(layer != nullptr && "Cannot present without a valid layer.");
+ 
+         MetalAutoreleasePool releasePool;
+@@ -2081,6 +2101,7 @@ namespace plume {
+     }
+ 
+     bool MetalSwapChain::acquireTexture(RenderCommandSemaphore *signalSemaphore, uint32_t *textureIndex) {
++        plumeMetalWaitWhileGPUPaused();
+         assert(signalSemaphore != nullptr);
+         assert(textureIndex != nullptr);
+         assert(*textureIndex < MAX_DRAWABLES);
+@@ -3783,6 +3804,7 @@ namespace plume {
+     }
+ 
+     void MetalCommandQueue::executeCommandLists(const RenderCommandList **commandLists, const uint32_t commandListCount, RenderCommandSemaphore **waitSemaphores, const uint32_t waitSemaphoreCount, RenderCommandSemaphore **signalSemaphores, const uint32_t signalSemaphoreCount, RenderCommandFence *signalFence) {
++        plumeMetalWaitWhileGPUPaused();
+         assert(commandLists != nullptr);
+         assert(commandListCount > 0);
+ 

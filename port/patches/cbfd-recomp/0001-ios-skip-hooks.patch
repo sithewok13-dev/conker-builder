@@ -1,0 +1,28 @@
+diff --git a/conker.toml b/conker.toml
+index decf772..ccd0728 100644
+--- a/conker.toml
++++ b/conker.toml
+@@ -771,3 +771,23 @@ text = "{ extern void conker_bubble_end(uint8_t*, recomp_context*); conker_bubbl
+ func = "func_15085710"
+ before_vram = 0x15085710
+ text = "{ extern void conker_stat_change(uint8_t*, recomp_context*); conker_stat_change(rdram, ctx); }"
++
++# conker-ios: Skip Intro and tap to skip cutscenes, built in (mods can't run on iOS), as
++# ConkerBFDReloaded does it (ios/app/conker_ios_game.cpp in conker-ios). The logos' frame
++# (func_151DE6D4) and the room change (func_15007A70), at their returns.
++[[patches.hook]]
++func = "func_151DE6D4"
++before_vram = 0x151DE7CC
++text = "{ extern void conker_skip_intro_logos(uint8_t*, recomp_context*); conker_skip_intro_logos(rdram, ctx); }"
++
++[[patches.hook]]
++func = "func_15007A70"
++before_vram = 0x15007B34
++text = "{ extern void conker_skip_intro_room_loaded(uint8_t*, recomp_context*); conker_skip_intro_room_loaded(rdram, ctx); }"
++
++# func_1501E05C is the game's "skip the playing cutscene?" check; at 0x1501E1A4, where all its
++# paths meet before returning ($v0 the answer), a tap decides instead.
++[[patches.hook]]
++func = "func_1501E05C"
++before_vram = 0x1501E1A4
++text = "{ extern void conker_skip_cutscene_result(uint8_t*, recomp_context*); conker_skip_cutscene_result(rdram, ctx); }"

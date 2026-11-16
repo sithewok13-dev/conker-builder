@@ -1,0 +1,15 @@
+# Never commit a ROM or anything made from one.
+*.z64
+*.n64
+*.v64
+*.rom
+generated/
+RecompiledFuncs/
+
+# Sources fetched by tools/fetch-sources.sh, and build output
+port/third_party/
+build*/
+*.ipa
+*.tar.xz
+.DS_Store
+xcuserdata/
