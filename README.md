@@ -96,7 +96,7 @@ it inside; not a .7z).
 - The right ROM's SHA-1 (in the .z64 byte order) is `4cbadd3c4e0729dec46af64ad018050eada4f47a`. The build
   converts .n64 and .v64 to .z64 itself.
 - Problems? The app writes `conker-log.txt` in *Files > On My iPhone > Conker*.
-- **This is early: expect bugs.** Tested on: an iPhone 17 Pro Max. I'm sorry for anything that goes wrong; if
+- **This is early: expect bugs.** Only lightly tested on an iPhone so far. I'm sorry for anything that goes wrong; if
   something does, a note with your phone's model and `conker-log.txt` helps.
 
 ## Credits

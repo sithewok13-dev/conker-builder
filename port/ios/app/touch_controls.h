@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 
 // On-screen N64 controller drawn over the game, in the house style of the other ports
-// (jk-files docs/HOUSE_STYLE.md, section 3; carried over from sote-ios's touch_controls.mm):
+// (carried over from sote-ios's touch_controls.mm):
 //  - a floating stick in the lower left (hidden until a thumb lands); drag anywhere else
 //    to look (CBFD-Recompiled's mouse camera and aiming);
 //  - A, B and the C buttons on the right, Z under L, L and R at the top;

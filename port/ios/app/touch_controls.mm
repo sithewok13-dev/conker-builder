@@ -33,7 +33,7 @@ namespace {
     constexpr uint16_t N64CLeft = 0x0002;
     constexpr uint16_t N64CRight = 0x0001;
 
-    // House style values (HOUSE_STYLE.md 3.1).
+    // Values shared with the other ports' touch controls.
     constexpr CGFloat IdleAlpha = 0.65;
     constexpr CGFloat TouchSlop = 6.0;
     constexpr CGFloat StickRadius = 60.0;
